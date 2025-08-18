@@ -1283,3 +1283,119 @@ fn test_custom_object_compare() {
     let rv = render!("{{ seq|sort|join('|') }}", seq);
     assert_eq!(rv, "0|1|2|3|4");
 }
+
+#[test]
+fn test_cross_type_comparison() {
+    // Test object that can compare to strings
+    #[derive(Debug, Clone)]
+    struct StringComparable {
+        value: String,
+    }
+
+    impl Object for StringComparable {
+        fn repr(self: &Arc<Self>) -> ObjectRepr {
+            ObjectRepr::Plain
+        }
+
+        fn value_cmp(self: &Arc<Self>, other: &Value) -> Option<Ordering> {
+            // Compare to strings
+            if let Some(other_str) = other.as_str() {
+                return Some(self.value.as_str().cmp(other_str));
+            }
+            // Delegate to custom_cmp for object comparisons
+            if let Some(other_obj) = other.as_object() {
+                return self.custom_cmp(other_obj);
+            }
+            None
+        }
+
+        fn custom_cmp(self: &Arc<Self>, other: &DynObject) -> Option<Ordering> {
+            let other = other.downcast_ref::<Self>()?;
+            Some(self.value.cmp(&other.value))
+        }
+
+        fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result
+        where
+            Self: Sized + 'static,
+        {
+            write!(f, "{}", self.value)
+        }
+    }
+
+    let obj = Value::from_object(StringComparable {
+        value: "test_value".to_string(),
+    });
+    let string_val = Value::from("test_value");
+    let other_string = Value::from("other_value");
+
+    // Test equality is commutative
+    assert_eq!(obj == string_val, true);
+    assert_eq!(string_val == obj, true);  // Commutativity
+    
+    // Test inequality
+    assert_eq!(obj == other_string, false);
+    assert_eq!(other_string == obj, false);
+    
+    // Test ordering is consistent
+    let ord1 = obj.cmp(&string_val);
+    let ord2 = string_val.cmp(&obj);
+    println!("obj.cmp(&string_val) = {:?}", ord1);
+    println!("string_val.cmp(&obj) = {:?}", ord2);
+    assert_eq!(ord1, Ordering::Equal);
+    assert_eq!(ord2, Ordering::Equal);
+    
+    // Test ordering with different values
+    assert_eq!(obj.cmp(&other_string), Ordering::Greater);  // "test_value" > "other_value"
+    assert_eq!(other_string.cmp(&obj), Ordering::Less);     // "other_value" < "test_value"
+    
+    // Test object-to-object comparison still works
+    let obj2 = Value::from_object(StringComparable {
+        value: "test_value".to_string(),
+    });
+    let obj3 = Value::from_object(StringComparable {
+        value: "different".to_string(),
+    });
+    
+    assert_eq!(obj == obj2, true);
+    assert_eq!(obj == obj3, false);
+    assert_eq!(obj.cmp(&obj3), Ordering::Greater);  // "test_value" > "different"
+}
+
+#[test]
+fn test_value_cmp_default_implementation() {
+    // Test that objects without value_cmp implementation still work
+    #[derive(Debug)]
+    struct PlainObject {
+        value: i32,
+    }
+
+    impl Object for PlainObject {
+        fn repr(self: &Arc<Self>) -> ObjectRepr {
+            ObjectRepr::Plain
+        }
+
+        fn custom_cmp(self: &Arc<Self>, other: &DynObject) -> Option<Ordering> {
+            let other = other.downcast_ref::<Self>()?;
+            Some(self.value.cmp(&other.value))
+        }
+
+        fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result
+        where
+            Self: Sized + 'static,
+        {
+            write!(f, "{}", self.value)
+        }
+    }
+
+    let obj1 = Value::from_object(PlainObject { value: 10 });
+    let obj2 = Value::from_object(PlainObject { value: 20 });
+    let string_val = Value::from("10");
+
+    // Object-to-object comparison should still work
+    assert_eq!(obj1 == obj2, false);
+    assert_eq!(obj1.cmp(&obj2), Ordering::Less);
+    
+    // Object-to-string comparison should not work (returns false)
+    assert_eq!(obj1 == string_val, false);
+    assert_eq!(string_val == obj1, false);
+}
