@@ -506,6 +506,21 @@ impl PartialEq for Value {
                 Some(ops::CoerceResult::I128(a, b)) => a == b,
                 Some(ops::CoerceResult::Str(a, b)) => a == b,
                 None => {
+                    // Try value_cmp from left side for cross-type comparisons
+                    if let Some(a) = self.as_object() {
+                        if let Some(rv) = a.value_cmp(other) {
+                            return rv == Ordering::Equal;
+                        }
+                    }
+                    
+                    // Try value_cmp from right side for commutativity
+                    if let Some(b) = other.as_object() {
+                        if let Some(rv) = b.value_cmp(self) {
+                            return rv == Ordering::Equal;
+                        }
+                    }
+                    
+                    // Original object-to-object comparison
                     if let (Some(a), Some(b)) = (self.as_object(), other.as_object()) {
                         if a.is_same_object(b) {
                             return true;
@@ -590,6 +605,20 @@ fn f64_total_cmp(left: f64, right: f64) -> Ordering {
 
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
+        // First try value_cmp for potential cross-type comparisons
+        // This must happen before the kind comparison to allow objects to compare with other types
+        if let Some(a) = self.as_object() {
+            if let Some(rv) = a.value_cmp(other) {
+                return rv;
+            }
+        }
+        
+        if let Some(b) = other.as_object() {
+            if let Some(rv) = b.value_cmp(self) {
+                return rv.reverse();
+            }
+        }
+        
         let kind_ordering = self.kind().cmp(&other.kind());
         if matches!(kind_ordering, Ordering::Less | Ordering::Greater) {
             return kind_ordering;
@@ -607,6 +636,7 @@ impl Ord for Value {
                 Some(ops::CoerceResult::I128(a, b)) => a.cmp(&b),
                 Some(ops::CoerceResult::Str(a, b)) => a.cmp(b),
                 None => {
+                    // value_cmp is already handled at the beginning of cmp()
                     let a = self.as_object().unwrap();
                     let b = other.as_object().unwrap();
 

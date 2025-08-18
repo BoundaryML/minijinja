@@ -280,6 +280,46 @@ pub trait Object: fmt::Debug + Send + Sync {
         None
     }
 
+    /// Custom comparison that receives the full Value for cross-type comparisons.
+    ///
+    /// This method is called before `custom_cmp` and allows custom objects to
+    /// compare against primitive types like strings or numbers. The default
+    /// implementation delegates to `custom_cmp` for object comparisons and
+    /// returns `None` for non-object types.
+    ///
+    /// This method enables cross-type comparisons such as comparing an enum
+    /// to a string value. When implementing this method, you can inspect the
+    /// actual `Value` type and perform appropriate comparisons.
+    ///
+    /// ```rust
+    /// # use std::sync::Arc;
+    /// # use std::cmp::Ordering;
+    /// # use minijinja::value::{Value, Object};
+    /// # #[derive(Debug)]
+    /// # struct MyEnum { value: String };
+    /// impl Object for MyEnum {
+    ///     fn value_cmp(self: &Arc<Self>, other: &Value) -> Option<Ordering> {
+    ///         // Compare to strings
+    ///         if let Some(other_str) = other.as_str() {
+    ///             return Some(self.value.cmp(other_str));
+    ///         }
+    ///         // Delegate to custom_cmp for object comparisons
+    ///         if let Some(other_obj) = other.as_object() {
+    ///             return self.custom_cmp(other_obj);
+    ///         }
+    ///         None
+    ///     }
+    /// }
+    /// ```
+    fn value_cmp(self: &Arc<Self>, other: &Value) -> Option<Ordering> {
+        // Default implementation: delegate to custom_cmp for objects only
+        if let Some(other_obj) = other.as_object() {
+            self.custom_cmp(other_obj)
+        } else {
+            None
+        }
+    }
+
     /// Formats the object for stringification.
     ///
     /// The default implementation is specific to the behavior of
@@ -647,6 +687,8 @@ type_erase! {
             args: &[Value]
         ) -> Result<Value, Error>;
 
+        fn value_cmp(&self, other: &Value) -> Option<Ordering>;
+        
         fn custom_cmp(&self, other: &DynObject) -> Option<Ordering>;
 
         fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
